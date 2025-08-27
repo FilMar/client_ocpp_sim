@@ -1,0 +1,19 @@
+{
+    "evses": {
+        "1": {
+            "connectors": {
+                "1": {
+                    "status": "Available"
+                }
+            }
+        },
+        "2": {
+            "connectors": {
+                "1": {
+                    "status": "Available"
+                }
+            }
+        }
+    },
+    "transactions": {}
+}
