@@ -10,6 +10,8 @@ from ocpp.v201.enums import (
     BootReasonEnumType,
     ConnectorStatusEnumType,
     ReadingContextEnumType,
+    TransactionEventEnumType,
+    TriggerReasonEnumType,
 )
 
 from .handlers import CoreHandlers
@@ -19,7 +21,7 @@ from .state import load_state
 
 
 class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
-    def __init__(self, cp_id, connection, vendor, model, firmware_version=None):
+    def __init__(self, cp_id, connection, vendor, model, firmware_version=None, connectors=2):
         super().__init__(cp_id, connection)
         self.vendor = vendor
         self.model = model
@@ -39,15 +41,18 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             self.transactions = saved_state.get("transactions", {})
         else:
             self.evses = {
-                1: {"connectors": {1: {"status": ConnectorStatusEnumType.available}}},
-                2: {"connectors": {1: {"status": ConnectorStatusEnumType.available}}},
+                1: {
+                    "connectors": {
+                        i: {"status": ConnectorStatusEnumType.available}
+                        for i in range(1, connectors + 1)
+                    }
+                },
             }
             self.transactions = {}
 
     async def meter_values_sender(self, tx_key):
-        """Invio periodico dei MeterValues per una transazione."""
+        """Periodically sends MeterValues for a transaction."""
         transaction = self.transactions[tx_key]
-        evse_id = transaction["evse_id"]
 
         while True:
             await asyncio.sleep(10)
@@ -67,10 +72,16 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                     ],
                 }
             ]
-            await self.send_meter_values(evse_id, meter_value)
+            await self.send_transaction_event(
+                event_type=TransactionEventEnumType.updated,
+                transaction_id=transaction["transaction_id"],
+                trigger_reason=TriggerReasonEnumType.meter_value_periodic,
+                seq_no=transaction["seq_no"],
+                meter_value=meter_value,
+            )
 
     async def resume_ongoing_tasks(self):
-        """Riprende le attività in background dopo il caricamento dello stato."""
+        """Resumes background tasks after loading the state."""
         for tx_key, tx_data in self.transactions.items():
             if tx_data.get("is_charging"):
                 logging.info(f"Resuming charging for transaction {tx_data['transaction_id']}")
@@ -82,7 +93,7 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             charging_station={
                 "model": self.model,
                 "vendor_name": self.vendor,
-                "serial_number": f"a673421c-{self.id}",
+                "serial_number": f"34b6a95b-{self.id}",
                 "firmware_version": self.firmware_version,
             },
             reason=BootReasonEnumType.power_up,
@@ -102,7 +113,7 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             await asyncio.sleep(interval)
 
 
-async def start_client(ws_url, cp_id, vendor, model, firmware):
+async def start_client(ws_url, cp_id, vendor, model, firmware, connectors):
     uri = f"{ws_url}/{cp_id}"
     print(f"Connecting to {uri}...")
     try:
@@ -115,6 +126,7 @@ async def start_client(ws_url, cp_id, vendor, model, firmware):
                 vendor=vendor,
                 model=model,
                 firmware_version=firmware,
+                connectors=connectors,
             )
 
             await charge_point.resume_ongoing_tasks()

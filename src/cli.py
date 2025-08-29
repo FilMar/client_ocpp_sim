@@ -34,12 +34,17 @@ def main():
     help="The firmware version.",
 )
 @click.option(
+    "--connectors",
+    default=2,
+    help="The number of connectors.",
+)
+@click.option(
     "--log-level",
     default="INFO",
     type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
     help="Sets the logging level.",
 )
-def run(ws_url, cp_id, vendor, model, firmware, log_level):
+def run(ws_url, cp_id, vendor, model, firmware, connectors, log_level):
     """
     Starts the OCPP client simulator.
 
@@ -56,7 +61,7 @@ def run(ws_url, cp_id, vendor, model, firmware, log_level):
     ocpp_logger.addHandler(file_handler)
     ocpp_logger.propagate = False
 
-    asyncio.run(start_client(ws_url, cp_id, vendor, model, firmware))
+    asyncio.run(start_client(ws_url, cp_id, vendor, model, firmware, connectors))
 
 
 if __name__ == "__main__":

@@ -4,12 +4,8 @@
             "connectors": {
                 "1": {
                     "status": "Available"
-                }
-            }
-        },
-        "2": {
-            "connectors": {
-                "1": {
+                },
+                "2": {
                     "status": "Available"
                 }
             }

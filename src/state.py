@@ -10,7 +10,7 @@ STATE_FILE = "charge_point_state.json"
 
 
 def save_state(charge_point):
-    """Salva lo stato del charge point su un file JSON."""
+    """Saves the state of the charge point to a JSON file."""
     evses_to_save = copy.deepcopy(charge_point.evses)
     for evse in evses_to_save.values():
         for conn in evse["connectors"].values():
@@ -36,7 +36,7 @@ def save_state(charge_point):
 
 
 def load_state():
-    """Carica lo stato del charge point da un file JSON, se esiste."""
+    """Loads the charge point state from a JSON file, if it exists."""
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r") as f:

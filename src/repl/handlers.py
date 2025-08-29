@@ -14,15 +14,15 @@ from src.state import save_state
 async def status(charge_point, *args):
     """Display status of connectors."""
     print("--- Connector Status ---")
-    for evse_id, evse in charge_point.evses.items():
-        for conn_id, conn in evse["connectors"].items():
-            tx_key = f"{evse_id}-{conn_id}"
+    if 1 in charge_point.evses:
+        for conn_id, conn in charge_point.evses[1]["connectors"].items():
+            tx_key = f"1-{conn_id}"
             tx_info = ""
             if tx_key in charge_point.transactions:
                 tx = charge_point.transactions[tx_key]
                 state = "Charging" if tx.get("is_charging") or "meter_task" in tx else "Occupied"
                 tx_info = f" (State: {state}, TxId: {tx['transaction_id']})"
-            print(f"EVSE {evse_id}, Connector {conn_id}: {conn['status'].value}{tx_info}")
+            print(f"Connector {conn_id}: {conn['status'].value}{tx_info}")
     print("------------------------")
 
 
@@ -36,19 +36,19 @@ async def logs(charge_point, *args):
     print("---------------------")
 
 
-async def connect(charge_point, evse_id_str, conn_id_str):
+async def connect(charge_point, conn_id_str):
     """Simulate connecting a vehicle to a connector."""
-    evse_id, conn_id = int(evse_id_str), int(conn_id_str)
-    charge_point.evses[evse_id]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.occupied
-    await charge_point.send_status_notification(evse_id, conn_id, ConnectorStatusEnumType.occupied)
+    conn_id = int(conn_id_str)
+    charge_point.evses[1]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.occupied
+    await charge_point.send_status_notification(conn_id, ConnectorStatusEnumType.occupied)
     tx_id = str(uuid.uuid4())
-    charge_point.transactions[f"{evse_id}-{conn_id}"] = {
-        "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": evse_id, "connector_id": conn_id
+    charge_point.transactions[f"1-{conn_id}"] = {
+        "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": 1, "connector_id": conn_id
     }
     await charge_point.send_transaction_event(
         TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0
     )
-    print(f"Connector {conn_id} on EVSE {evse_id} Occupied, transaction {tx_id} started.")
+    print(f"Connector {conn_id} Occupied, transaction {tx_id} started.")
     save_state(charge_point)
 
 
@@ -68,10 +68,10 @@ async def event(charge_point, event_type, *description_parts):
     print(f"Sent NotifyEvent (Type: {event_type}, Description: '{description}')")
 
 
-async def charge(charge_point, evse_id_str, conn_id_str):
+async def charge(charge_point, conn_id_str):
     """Start charging."""
-    evse_id, conn_id = int(evse_id_str), int(conn_id_str)
-    tx_key = f"{evse_id}-{conn_id}"
+    conn_id = int(conn_id_str)
+    tx_key = f"1-{conn_id}"
     if tx_key in charge_point.transactions and "meter_task" not in charge_point.transactions[tx_key]:
         tx = charge_point.transactions[tx_key]
         tx["seq_no"] += 1
@@ -86,10 +86,10 @@ async def charge(charge_point, evse_id_str, conn_id_str):
         print("Error: No active transaction or already charging.")
 
 
-async def stop_charge(charge_point, evse_id_str, conn_id_str):
+async def stop_charge(charge_point, conn_id_str):
     """Stop charging."""
-    evse_id, conn_id = int(evse_id_str), int(conn_id_str)
-    tx_key = f"{evse_id}-{conn_id}"
+    conn_id = int(conn_id_str)
+    tx_key = f"1-{conn_id}"
     if tx_key in charge_point.transactions and "meter_task" in charge_point.transactions[tx_key]:
         tx = charge_point.transactions[tx_key]
         tx["meter_task"].cancel()
@@ -104,10 +104,10 @@ async def stop_charge(charge_point, evse_id_str, conn_id_str):
         print("Error: Not charging.")
 
 
-async def disconnect(charge_point, evse_id_str, conn_id_str):
+async def disconnect(charge_point, conn_id_str):
     """Disconnect a vehicle."""
-    evse_id, conn_id = int(evse_id_str), int(conn_id_str)
-    tx_key = f"{evse_id}-{conn_id}"
+    conn_id = int(conn_id_str)
+    tx_key = f"1-{conn_id}"
     tx = charge_point.transactions.pop(tx_key, None)
     if tx:
         if "meter_task" in tx:
@@ -117,9 +117,9 @@ async def disconnect(charge_point, evse_id_str, conn_id_str):
             TransactionEventEnumType.ended, tx["transaction_id"], TriggerReasonEnumType.ev_disconnected, tx["seq_no"]
         )
         print(f"Transaction {tx['transaction_id']} ended.")
-    charge_point.evses[evse_id]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.available
-    await charge_point.send_status_notification(evse_id, conn_id, ConnectorStatusEnumType.available)
-    print(f"Connector {conn_id} on EVSE {evse_id} is now Available.")
+    charge_point.evses[1]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.available
+    await charge_point.send_status_notification(conn_id, ConnectorStatusEnumType.available)
+    print(f"Connector {conn_id} is now Available.")
     save_state(charge_point)
 
 

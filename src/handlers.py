@@ -122,13 +122,13 @@ class CoreHandlers:
         )
 
     async def _firmware_update_process(self, request_id: int):
-        await asyncio.sleep(2) # Simula il tempo per iniziare il download
+        await asyncio.sleep(2) # Simulate time to start download
         await self.send_firmware_status_notification(FirmwareStatusEnumType.downloading, request_id)
-        await asyncio.sleep(10) # Simula il tempo di download
+        await asyncio.sleep(10) # Simulate download time
         await self.send_firmware_status_notification(FirmwareStatusEnumType.downloaded, request_id)
         await asyncio.sleep(2)
         await self.send_firmware_status_notification(FirmwareStatusEnumType.installing, request_id)
-        await asyncio.sleep(10) # Simula il tempo di installazione
+        await asyncio.sleep(10) # Simulate installation time
         await self.send_firmware_status_notification(FirmwareStatusEnumType.installed, request_id)
 
     @on(Action.update_firmware)
@@ -138,9 +138,9 @@ class CoreHandlers:
         return call_result.UpdateFirmware(status=UpdateFirmwareStatusEnumType.accepted)
 
     async def _log_upload_process(self, request_id: int):
-        await asyncio.sleep(1) # Simula il tempo per iniziare l'upload
+        await asyncio.sleep(1) # Simulate time to start upload
         await self.send_log_status_notification(UploadLogStatusEnumType.uploading, request_id)
-        await asyncio.sleep(5)  # Simula il tempo di upload
+        await asyncio.sleep(5)  # Simulate upload time
         await self.send_log_status_notification(UploadLogStatusEnumType.uploaded, request_id)
 
     @on(Action.get_log)

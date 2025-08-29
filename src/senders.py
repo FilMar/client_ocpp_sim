@@ -13,15 +13,15 @@ from ocpp.v201.enums import (
 
 
 class ChargePointSenderMixin:
-    async def send_status_notification(self, evse_id: int, connector_id: int, status: ConnectorStatusEnumType):
+    async def send_status_notification(self, connector_id: int, status: ConnectorStatusEnumType):
         request = call.StatusNotification(
             timestamp=datetime.now(timezone.utc).isoformat(),
             connector_status=status,
-            evse_id=evse_id,
+            evse_id=1,
             connector_id=connector_id,
         )
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: {evse_id}, ConnectorId: {connector_id}, Status: {status})"
+            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: 1, ConnectorId: {connector_id}, Status: {status})"
         )
         await self.call(request)
 
@@ -49,15 +49,7 @@ class ChargePointSenderMixin:
         )
         await self.call(request)
 
-    async def send_meter_values(self, evse_id: int, meter_value: list):
-        request = call.MeterValues(
-            evse_id=evse_id,
-            meter_value=meter_value,
-        )
-        self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> MeterValues"
-        )
-        await self.call(request)
+    
 
     async def send_firmware_status_notification(self, status: FirmwareStatusEnumType, request_id: int):
         request = call.FirmwareStatusNotification(status=status, request_id=request_id)
@@ -76,10 +68,10 @@ class ChargePointSenderMixin:
     async def send_notify_event(self, event_type: str, description: str):
         request = call.NotifyEvent(
             generated_at=datetime.now(timezone.utc).isoformat(),
-            seq_no=0,  # In una implementazione reale, questo andrebbe gestito
+            seq_no=0,  # In a real implementation, this should be managed
             event_data=[
                 {
-                    "eventId": 0,  # In una implementazione reale, questo andrebbe gestito
+                    "eventId": 0,  # In a real implementation, this should be managed
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "trigger": "Delta",
                     "actualValue": description,
