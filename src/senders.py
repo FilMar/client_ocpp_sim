@@ -35,13 +35,18 @@ class ChargePointSenderMixin:
             f"[{datetime.now(timezone.utc).isoformat()}] << Authorize Response ({response.id_token_info['status']})"
         )
 
-    async def send_transaction_event(self, event_type: TransactionEventEnumType, transaction_id: str, trigger_reason: TriggerReasonEnumType, seq_no: int, meter_value: list = None):
+    async def send_transaction_event(self, event_type: TransactionEventEnumType, transaction_id: str, trigger_reason: TriggerReasonEnumType, seq_no: int, evse_id: int = 1, connector_id: int = None, meter_value: list = None):
+        evse = {"id": evse_id}
+        if connector_id is not None:
+            evse["connectorId"] = connector_id
+            
         request = call.TransactionEvent(
             event_type=event_type,
             timestamp=datetime.now(timezone.utc).isoformat(),
             trigger_reason=trigger_reason,
             seq_no=seq_no,
             transaction_info={"transaction_id": transaction_id},
+            evse=evse,
             meter_value=meter_value,
         )
         self.history.append(

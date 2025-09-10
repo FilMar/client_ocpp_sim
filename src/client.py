@@ -77,6 +77,8 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                 transaction_id=transaction["transaction_id"],
                 trigger_reason=TriggerReasonEnumType.meter_value_periodic,
                 seq_no=transaction["seq_no"],
+                evse_id=transaction["evse_id"],
+                connector_id=transaction["connector_id"],
                 meter_value=meter_value,
             )
 

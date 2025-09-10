@@ -46,7 +46,7 @@ async def connect(charge_point, conn_id_str):
         "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": 1, "connector_id": conn_id
     }
     await charge_point.send_transaction_event(
-        TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0
+        TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0, evse_id=1, connector_id=conn_id
     )
     print(f"Connector {conn_id} Occupied, transaction {tx_id} started.")
     save_state(charge_point)
@@ -76,7 +76,7 @@ async def charge(charge_point, conn_id_str):
         tx = charge_point.transactions[tx_key]
         tx["seq_no"] += 1
         await charge_point.send_transaction_event(
-            TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.charging_state_changed, tx["seq_no"]
+            TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.charging_state_changed, tx["seq_no"], evse_id=1, connector_id=conn_id
         )
         task = asyncio.create_task(charge_point.meter_values_sender(tx_key))
         tx["meter_task"] = task
@@ -96,7 +96,7 @@ async def stop_charge(charge_point, conn_id_str):
         del tx["meter_task"]
         tx["seq_no"] += 1
         await charge_point.send_transaction_event(
-            TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.stop_authorized, tx["seq_no"]
+            TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.stop_authorized, tx["seq_no"], evse_id=1, connector_id=conn_id
         )
         print(f"Charging stopped for transaction {tx['transaction_id']}.")
         save_state(charge_point)
@@ -114,7 +114,7 @@ async def disconnect(charge_point, conn_id_str):
             tx["meter_task"].cancel()
         tx["seq_no"] += 1
         await charge_point.send_transaction_event(
-            TransactionEventEnumType.ended, tx["transaction_id"], TriggerReasonEnumType.ev_disconnected, tx["seq_no"]
+            TransactionEventEnumType.ended, tx["transaction_id"], TriggerReasonEnumType.ev_departed, tx["seq_no"], evse_id=1, connector_id=conn_id
         )
         print(f"Transaction {tx['transaction_id']} ended.")
     charge_point.evses[1]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.available
