@@ -107,6 +107,11 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                 f"[{datetime.now(timezone.utc).isoformat()}] << BootNotification Confirmed"
             )
             asyncio.create_task(self.send_heartbeat(response.interval))
+            
+            # Send StatusNotification for all connectors after successful BootNotification
+            for evse_id, evse_data in self.evses.items():
+                for connector_id, connector_data in evse_data["connectors"].items():
+                    await self.send_status_notification(connector_id, connector_data["status"])
 
     async def send_heartbeat(self, interval):
         while True:

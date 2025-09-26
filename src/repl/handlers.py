@@ -42,14 +42,22 @@ async def connect(charge_point, conn_id_str):
     charge_point.evses[1]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.occupied
     await charge_point.send_status_notification(conn_id, ConnectorStatusEnumType.occupied)
     tx_id = str(uuid.uuid4())
-    charge_point.transactions[f"1-{conn_id}"] = {
-        "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": 1, "connector_id": conn_id
-    }
-    await charge_point.send_transaction_event(
-        TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0, evse_id=1, connector_id=conn_id
-    )
-    print(f"Connector {conn_id} Occupied, transaction {tx_id} started.")
-    save_state(charge_point)
+    
+    try:
+        response = await charge_point.send_transaction_event(
+            TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0, evse_id=1, connector_id=conn_id
+        )
+        # Solo se il TransactionEvent viene accettato, salviamo la transazione localmente
+        charge_point.transactions[f"1-{conn_id}"] = {
+            "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": 1, "connector_id": conn_id
+        }
+        print(f"Connector {conn_id} Occupied, transaction {tx_id} started.")
+        save_state(charge_point)
+    except Exception as e:
+        print(f"Error starting transaction: {e}")
+        # Ripristina lo stato del connettore se la transazione fallisce
+        charge_point.evses[1]["connectors"][conn_id]["status"] = ConnectorStatusEnumType.available
+        await charge_point.send_status_notification(conn_id, ConnectorStatusEnumType.available)
 
 
 async def authorize(charge_point, id_token):

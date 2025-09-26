@@ -6,26 +6,18 @@
                     "status": "Occupied"
                 },
                 "2": {
-                    "status": "Occupied"
+                    "status": "Available"
                 }
             }
         }
     },
     "transactions": {
         "1-1": {
-            "transaction_id": "ffc25f7f-9b27-44fb-a1df-5c3513ed667c",
+            "transaction_id": "7c6d02ac-5126-49a1-8892-1d63a279eb3d",
             "seq_no": 0,
             "energy": 0,
             "evse_id": 1,
             "connector_id": 1,
-            "is_charging": false
-        },
-        "1-2": {
-            "transaction_id": "d677ace1-dc13-43df-8689-9ed5a1ec5469",
-            "seq_no": 0,
-            "energy": 0,
-            "evse_id": 1,
-            "connector_id": 2,
             "is_charging": false
         }
     }

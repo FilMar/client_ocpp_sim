@@ -21,25 +21,29 @@ class ChargePointSenderMixin:
             connector_id=connector_id,
         )
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: 1, ConnectorId: {connector_id}, Status: {status})"
+            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: 1, ConnectorId: {
+                connector_id}, Status: {status})"
         )
         await self.call(request)
 
     async def send_authorize(self, id_token: str):
-        request = call.Authorize(id_token={"id_token": id_token, "type": "ISO14443"})
+        request = call.Authorize(
+            id_token={"id_token": id_token, "type": "ISO14443"})
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> Authorize (IdToken: {id_token})"
+            f"[{datetime.now(timezone.utc).isoformat()
+                }] >> Authorize (IdToken: {id_token})"
         )
         response = await self.call(request)
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] << Authorize Response ({response.id_token_info['status']})"
+            f"[{datetime.now(timezone.utc).isoformat()}] << Authorize Response ({
+                response.id_token_info['status']})"
         )
 
     async def send_transaction_event(self, event_type: TransactionEventEnumType, transaction_id: str, trigger_reason: TriggerReasonEnumType, seq_no: int, evse_id: int = 1, connector_id: int = None, meter_value: list = None):
         evse = {"id": evse_id}
         if connector_id is not None:
             evse["connectorId"] = connector_id
-            
+
         request = call.TransactionEvent(
             event_type=event_type,
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -50,23 +54,27 @@ class ChargePointSenderMixin:
             meter_value=meter_value,
         )
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> TransactionEvent (Type: {event_type}, TxId: {transaction_id})"
+            f"[{datetime.now(timezone.utc).isoformat()}] >> TransactionEvent (Type: {
+                event_type}, TxId: {transaction_id})"
         )
-        await self.call(request)
-
-    
+        response = await self.call(request)
+        return response
 
     async def send_firmware_status_notification(self, status: FirmwareStatusEnumType, request_id: int):
-        request = call.FirmwareStatusNotification(status=status, request_id=request_id)
+        request = call.FirmwareStatusNotification(
+            status=status, request_id=request_id)
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> FirmwareStatusNotification (Status: {status})"
+            f"[{datetime.now(timezone.utc).isoformat(
+            )}] >> FirmwareStatusNotification (Status: {status})"
         )
         await self.call(request)
 
     async def send_log_status_notification(self, status: LogStatusEnumType, request_id: int):
-        request = call.LogStatusNotification(status=status, request_id=request_id)
+        request = call.LogStatusNotification(
+            status=status, request_id=request_id)
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> LogStatusNotification (Status: {status})"
+            f"[{datetime.now(timezone.utc).isoformat()
+                }] >> LogStatusNotification (Status: {status})"
         )
         await self.call(request)
 
@@ -87,6 +95,7 @@ class ChargePointSenderMixin:
             ],
         )
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> NotifyEvent (Type: {event_type})"
+            f"[{datetime.now(timezone.utc).isoformat()
+                }] >> NotifyEvent (Type: {event_type})"
         )
         await self.call(request)
