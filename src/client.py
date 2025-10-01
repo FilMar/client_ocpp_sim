@@ -95,7 +95,7 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             charging_station={
                 "model": self.model,
                 "vendor_name": self.vendor,
-                "serial_number": f"34b6a95b-{self.id}",
+                "serial_number": f"afef3d68-{self.id}",
                 "firmware_version": self.firmware_version,
             },
             reason=BootReasonEnumType.power_up,

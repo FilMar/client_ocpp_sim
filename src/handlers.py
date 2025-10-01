@@ -7,6 +7,7 @@ from ocpp.v201.enums import (
     Action,
     ChargingProfileStatusEnumType,
     ClearChargingProfileStatusEnumType,
+    ConnectorStatusEnumType,
     DataTransferStatusEnumType,
     FirmwareStatusEnumType,
     GenericStatusEnumType,
@@ -16,7 +17,9 @@ from ocpp.v201.enums import (
     RequestStartStopStatusEnumType,
     ResetStatusEnumType,
     SetVariableStatusEnumType,
+    TransactionEventEnumType,
     TriggerMessageStatusEnumType,
+    TriggerReasonEnumType,
     UnlockStatusEnumType,
     UpdateFirmwareStatusEnumType,
     UploadLogStatusEnumType,
@@ -34,9 +37,65 @@ class CoreHandlers:
         self.history.append(
             f"[{datetime.now(timezone.utc).isoformat()}] << RequestStartTransaction"
         )
+        
+        # Cerca un connettore connesso (Occupied) che non sta già caricando
+        connected_connector = None
+        evse_id = None
+        for evse_id_key, evse_data in self.evses.items():
+            for connector_id, connector_data in evse_data["connectors"].items():
+                if connector_data["status"] == ConnectorStatusEnumType.occupied:
+                    tx_key = f"{evse_id_key}-{connector_id}"
+                    # Verifica se non sta già caricando
+                    if tx_key in self.transactions and "meter_task" not in self.transactions[tx_key]:
+                        connected_connector = connector_id
+                        evse_id = evse_id_key
+                        break
+            if connected_connector:
+                break
+        
+        # Se c'è un connettore connesso, avvia automaticamente la ricarica in background
+        if connected_connector and evse_id:
+            asyncio.create_task(self._handle_remote_start_charging(evse_id, connected_connector))
+        
         return call_result.RequestStartTransaction(
             status=RequestStartStopStatusEnumType.accepted
         )
+    
+    async def _handle_remote_start_charging(self, evse_id, connected_connector):
+        """Gestisce l'avvio della ricarica in background dopo la risposta al RequestStartTransaction."""
+        tx_key = f"{evse_id}-{connected_connector}"
+        tx = self.transactions[tx_key]
+        tx["seq_no"] += 1
+        
+        # Invia TransactionEvent per indicare l'inizio della ricarica
+        response = await self.send_transaction_event(
+            event_type=TransactionEventEnumType.updated,
+            transaction_id=tx["transaction_id"],
+            trigger_reason=TriggerReasonEnumType.remote_start,
+            seq_no=tx["seq_no"],
+            evse_id=evse_id,
+            connector_id=connected_connector
+        )
+        
+        # Solo dopo la risposta positiva del TransactionEvent, cambia lo stato e avvia la ricarica
+        if response:  # Se la risposta è positiva
+            # Cambia lo stato del connettore a "unavailable"
+            self.evses[evse_id]["connectors"][connected_connector]["status"] = ConnectorStatusEnumType.unavailable
+            
+            # Invia StatusNotification per il cambio di stato
+            await self.send_status_notification(connected_connector, ConnectorStatusEnumType.unavailable)
+            
+            # Avvia il task per l'invio periodico dei MeterValues
+            task = asyncio.create_task(self.meter_values_sender(tx_key))
+            tx["meter_task"] = task
+            
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] Auto-started charging on connector {connected_connector}"
+            )
+            
+            # Salva lo stato aggiornato
+            from .state import save_state
+            save_state(self)
 
     @on(Action.request_stop_transaction)
     async def on_request_stop_transaction(self, transaction_id: str, **kwargs):
