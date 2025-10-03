@@ -1,0 +1,19 @@
+{
+    "evses": {
+        "1": {
+            "status": "Available"
+        },
+        "2": {
+            "status": "Unavailable"
+        }
+    },
+    "transactions": {
+        "2": {
+            "transaction_id": "e0d4e84e-ab0d-421d-bcc9-04821a09f7b9",
+            "seq_no": 13,
+            "energy": 1100,
+            "evse_id": 2,
+            "is_charging": false
+        }
+    }
+}

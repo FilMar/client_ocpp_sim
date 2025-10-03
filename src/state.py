@@ -13,8 +13,7 @@ def save_state(charge_point):
     """Saves the state of the charge point to a JSON file."""
     evses_to_save = copy.deepcopy(charge_point.evses)
     for evse in evses_to_save.values():
-        for conn in evse["connectors"].values():
-            conn["status"] = conn["status"].value
+        evse["status"] = evse["status"].value
 
     transactions_to_save = {}
     for tx_key, tx_data in charge_point.transactions.items():

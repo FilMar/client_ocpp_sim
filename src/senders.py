@@ -13,16 +13,15 @@ from ocpp.v201.enums import (
 
 
 class ChargePointSenderMixin:
-    async def send_status_notification(self, connector_id: int, status: ConnectorStatusEnumType):
+    async def send_status_notification(self, evse_id: int, status: ConnectorStatusEnumType):
         request = call.StatusNotification(
             timestamp=datetime.now(timezone.utc).isoformat(),
             connector_status=status,
-            evse_id=1,
-            connector_id=connector_id,
+            evse_id=evse_id,
+            connector_id=1,
         )
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: 1, ConnectorId: {
-                connector_id}, Status: {status})"
+            f"[{datetime.now(timezone.utc).isoformat()}] >> StatusNotification (EvseId: {evse_id}, ConnectorId: 1, Status: {status})"
         )
         await self.call(request)
 
@@ -39,10 +38,8 @@ class ChargePointSenderMixin:
                 response.id_token_info['status']})"
         )
 
-    async def send_transaction_event(self, event_type: TransactionEventEnumType, transaction_id: str, trigger_reason: TriggerReasonEnumType, seq_no: int, evse_id: int = 1, connector_id: int = None, meter_value: list = None):
-        evse = {"id": evse_id}
-        if connector_id is not None:
-            evse["connectorId"] = connector_id
+    async def send_transaction_event(self, event_type: TransactionEventEnumType, transaction_id: str, trigger_reason: TriggerReasonEnumType, seq_no: int, evse_id: int = 1, connector_id: int = 1, meter_value: list = None):
+        evse = {"id": evse_id, "connectorId": connector_id}
 
         request = call.TransactionEvent(
             event_type=event_type,
@@ -77,6 +74,17 @@ class ChargePointSenderMixin:
                 }] >> LogStatusNotification (Status: {status})"
         )
         await self.call(request)
+
+    async def send_meter_values(self, evse_id: int, meter_value: list):
+        request = call.MeterValues(
+            evse_id=evse_id,
+            meter_value=meter_value,
+        )
+        self.history.append(
+            f"[{datetime.now(timezone.utc).isoformat()}] >> MeterValues (EvseId: {evse_id})"
+        )
+        response = await self.call(request)
+        return response
 
     async def send_notify_event(self, event_type: str, description: str):
         request = call.NotifyEvent(

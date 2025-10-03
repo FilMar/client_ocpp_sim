@@ -33,20 +33,18 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             raw_evses = saved_state.get("evses", {})
             self.evses = {int(k): v for k, v in raw_evses.items()}
             for evse in self.evses.values():
-                evse["connectors"] = {
-                    int(k): v for k, v in evse["connectors"].items()
-                }
-                for conn in evse["connectors"].values():
-                    conn["status"] = ConnectorStatusEnumType(conn["status"])
+                if "status" in evse:
+                    evse["status"] = ConnectorStatusEnumType(evse["status"])
+                elif "connectors" in evse:
+                    # Migration from old connector-based structure
+                    first_connector = list(evse["connectors"].values())[0]
+                    evse["status"] = ConnectorStatusEnumType(first_connector["status"])
+                    del evse["connectors"]
             self.transactions = saved_state.get("transactions", {})
         else:
             self.evses = {
-                1: {
-                    "connectors": {
-                        i: {"status": ConnectorStatusEnumType.available}
-                        for i in range(1, connectors + 1)
-                    }
-                },
+                i: {"status": ConnectorStatusEnumType.available}
+                for i in range(1, connectors + 1)
             }
             self.transactions = {}
 
@@ -72,13 +70,20 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                     ],
                 }
             ]
+            # Send MeterValues message
+            await self.send_meter_values(
+                evse_id=transaction["evse_id"],
+                meter_value=meter_value,
+            )
+            
+            # Send TransactionEvent with meter values
             await self.send_transaction_event(
                 event_type=TransactionEventEnumType.updated,
                 transaction_id=transaction["transaction_id"],
                 trigger_reason=TriggerReasonEnumType.meter_value_periodic,
                 seq_no=transaction["seq_no"],
                 evse_id=transaction["evse_id"],
-                connector_id=transaction["connector_id"],
+                connector_id=1,
                 meter_value=meter_value,
             )
 
@@ -108,10 +113,9 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             )
             asyncio.create_task(self.send_heartbeat(response.interval))
             
-            # Send StatusNotification for all connectors after successful BootNotification
+            # Send StatusNotification for all EVSEs after successful BootNotification
             for evse_id, evse_data in self.evses.items():
-                for connector_id, connector_data in evse_data["connectors"].items():
-                    await self.send_status_notification(connector_id, connector_data["status"])
+                await self.send_status_notification(evse_id, evse_data["status"])
 
     async def send_heartbeat(self, interval):
         while True:
