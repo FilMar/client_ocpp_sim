@@ -27,6 +27,7 @@ def save_state(charge_point):
     state = {
         "evses": evses_to_save,
         "transactions": transactions_to_save,
+        "charging_profiles": charge_point.charging_profiles,
     }
 
     with open(STATE_FILE, "w") as f:

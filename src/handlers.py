@@ -33,60 +33,114 @@ class CoreHandlers:
         return call_result.Reset(status=ResetStatusEnumType.accepted)
 
     @on(Action.request_start_transaction)
-    async def on_request_start_transaction(self, remote_start_id: int, id_token: dict, **kwargs):
+    async def on_request_start_transaction(self, remote_start_id: int, id_token: dict, evse_id=None, **kwargs):
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] << RequestStartTransaction"
+            f"[{datetime.now(timezone.utc).isoformat()}] << RequestStartTransaction (EVSE {evse_id})"
         )
-        
-        # Cerca un EVSE connesso (Occupied) che non sta già caricando
-        connected_evse = None
-        for evse_id, evse_data in self.evses.items():
-            if evse_data["status"] == ConnectorStatusEnumType.occupied:
-                # Verifica se non sta già caricando
-                if evse_id in self.transactions and "meter_task" not in self.transactions[evse_id]:
-                    connected_evse = evse_id
+
+        # Se non è specificato un evse_id, usa il primo disponibile
+        if evse_id is None:
+            for eid in self.evses.keys():
+                if eid not in self.transactions:
+                    evse_id = eid
                     break
-        
-        # Se c'è un EVSE connesso, avvia automaticamente la ricarica in background
-        if connected_evse:
-            asyncio.create_task(self._handle_remote_start_charging(connected_evse))
-        
+
+        if evse_id is None:
+            # Nessun EVSE disponibile
+            return call_result.RequestStartTransaction(
+                status=RequestStartStopStatusEnumType.rejected
+            )
+
+        # Avvia la transazione in background
+        asyncio.create_task(self._handle_remote_start_transaction(evse_id, remote_start_id, id_token))
+
         return call_result.RequestStartTransaction(
             status=RequestStartStopStatusEnumType.accepted
         )
     
-    async def _handle_remote_start_charging(self, evse_id):
-        """Gestisce l'avvio della ricarica in background dopo la risposta al RequestStartTransaction."""
-        tx = self.transactions[evse_id]
-        tx["seq_no"] += 1
-        
-        # Invia TransactionEvent per indicare l'inizio della ricarica
+    async def _handle_remote_start_transaction(self, evse_id, remote_start_id, id_token):
+        """Gestisce la creazione della transazione per RequestStartTransaction."""
+        import uuid
+
+        # Se c'è già una transazione su questo EVSE
+        if evse_id in self.transactions:
+            tx = self.transactions[evse_id]
+
+            # Se sta già caricando, ignora
+            if "meter_task" in tx:
+                self.history.append(
+                    f"[{datetime.now(timezone.utc).isoformat()}] Remote start ignored: EVSE {evse_id} is already charging"
+                )
+                return
+
+            # Se è una transazione normale (già connessa ma non in carica), avvia la ricarica
+            if not tx.get("pending_remote_start"):
+                tx["seq_no"] += 1
+
+                # Invia TransactionEvent updated con trigger RemoteStart
+                await self.send_transaction_event(
+                    event_type=TransactionEventEnumType.updated,
+                    transaction_id=tx["transaction_id"],
+                    trigger_reason=TriggerReasonEnumType.remote_start,
+                    seq_no=tx["seq_no"],
+                    evse_id=evse_id,
+                    connector_id=1
+                )
+
+                # Cambia lo stato a unavailable durante la ricarica
+                self.evses[evse_id]["status"] = ConnectorStatusEnumType.unavailable
+                await self.send_status_notification(evse_id, ConnectorStatusEnumType.unavailable)
+
+                # Avvia il meter values sender
+                task = asyncio.create_task(self.meter_values_sender(evse_id))
+                tx["meter_task"] = task
+                tx["remote_start_id"] = remote_start_id
+
+                self.history.append(
+                    f"[{datetime.now(timezone.utc).isoformat()}] Remote start: charging started on already connected EVSE {evse_id}"
+                )
+
+                # Salva lo stato
+                from .state import save_state
+                save_state(self)
+                return
+            else:
+                # È già un remote start pending, ignora
+                self.history.append(
+                    f"[{datetime.now(timezone.utc).isoformat()}] Remote start ignored: EVSE {evse_id} already has a pending remote start"
+                )
+                return
+
+        # Nessuna transazione esistente: crea una nuova transazione con stato pending_remote_start
+        tx_id = str(uuid.uuid4())
+
+        # Invia TransactionEvent started con trigger RemoteStart
         response = await self.send_transaction_event(
-            event_type=TransactionEventEnumType.updated,
-            transaction_id=tx["transaction_id"],
+            event_type=TransactionEventEnumType.started,
+            transaction_id=tx_id,
             trigger_reason=TriggerReasonEnumType.remote_start,
-            seq_no=tx["seq_no"],
+            seq_no=0,
             evse_id=evse_id,
             connector_id=1
         )
-        
-        # Solo dopo la risposta positiva del TransactionEvent, cambia lo stato e avvia la ricarica
-        if response:  # Se la risposta è positiva
-            # Cambia lo stato dell'EVSE a "unavailable"
-            self.evses[evse_id]["status"] = ConnectorStatusEnumType.unavailable
-            
-            # Invia StatusNotification per il cambio di stato
-            await self.send_status_notification(evse_id, ConnectorStatusEnumType.unavailable)
-            
-            # Avvia il task per l'invio periodico dei MeterValues
-            task = asyncio.create_task(self.meter_values_sender(evse_id))
-            tx["meter_task"] = task
-            
+
+        if response:
+            # Salva la transazione con flag che indica che è in attesa del plug-in
+            self.transactions[evse_id] = {
+                "transaction_id": tx_id,
+                "seq_no": 0,
+                "energy": 0,
+                "evse_id": evse_id,
+                "pending_remote_start": True,
+                "remote_start_id": remote_start_id,
+                "id_token": id_token
+            }
+
             self.history.append(
-                f"[{datetime.now(timezone.utc).isoformat()}] Auto-started charging on EVSE {evse_id}"
+                f"[{datetime.now(timezone.utc).isoformat()}] Remote start transaction {tx_id} created for EVSE {evse_id}, waiting for plug-in"
             )
-            
-            # Salva lo stato aggiornato
+
+            # Salva lo stato
             from .state import save_state
             save_state(self)
 
@@ -148,29 +202,123 @@ class CoreHandlers:
 
     @on(Action.set_charging_profile)
     async def on_set_charging_profile(self, evse_id: int, charging_profile: dict, **kwargs):
+        profile_id = charging_profile.get("id", "unknown")
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] << SetChargingProfile"
+            f"[{datetime.now(timezone.utc).isoformat()}] << SetChargingProfile (EVSE: {evse_id}, Profile ID: {profile_id})"
         )
+
+        # Basic validation
+        if not charging_profile:
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        # Validate required fields
+        if "id" not in charging_profile:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: missing 'id'"
+            )
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        if "charging_schedule" not in charging_profile:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: missing 'charging_schedule'"
+            )
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        schedule = charging_profile["charging_schedule"]
+        if "charging_rate_unit" not in schedule or "charging_schedule_period" not in schedule:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: invalid charging_schedule"
+            )
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        # Check if EVSE exists
+        if evse_id not in self.evses:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: EVSE {evse_id} not found"
+            )
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        # Save the profile
+        self.charging_profiles[evse_id] = charging_profile
+        self.history.append(
+            f"[{datetime.now(timezone.utc).isoformat()}] Charging profile {profile_id} set for EVSE {evse_id}"
+        )
+
+        # Save state
+        from .state import save_state
+        save_state(self)
+
         return call_result.SetChargingProfile(
             status=ChargingProfileStatusEnumType.accepted
         )
 
     @on(Action.get_charging_profiles)
-    async def on_get_charging_profiles(self, request_id: int, **kwargs):
+    async def on_get_charging_profiles(
+        self,
+        request_id: int,
+        evse_id: int = None,
+        charging_profile: dict = None,
+        **kwargs
+    ):
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] << GetChargingProfiles"
+            f"[{datetime.now(timezone.utc).isoformat()}] << GetChargingProfiles (EVSE: {evse_id})"
         )
+
+        # Filter profiles based on request criteria
+        if not self.charging_profiles:
+            return call_result.GetChargingProfiles(
+                status=GetChargingProfileStatusEnumType.no_profiles
+            )
+
+        # If evse_id is specified, check if we have a profile for it
+        if evse_id is not None:
+            if evse_id not in self.charging_profiles:
+                return call_result.GetChargingProfiles(
+                    status=GetChargingProfileStatusEnumType.no_profiles
+                )
+
+            # TODO: In a complete implementation, we should send ReportChargingProfiles
+            # with the actual profile data. For now, we just confirm we have it.
+            return call_result.GetChargingProfiles(
+                status=GetChargingProfileStatusEnumType.accepted
+            )
+
+        # If no evse_id specified, return accepted if we have any profiles
         return call_result.GetChargingProfiles(
-            status=GetChargingProfileStatusEnumType.no_profiles
+            status=GetChargingProfileStatusEnumType.accepted
         )
 
     @on(Action.clear_charging_profile)
-    async def on_clear_charging_profile(self, **kwargs):
+    async def on_clear_charging_profile(self, charging_profile_id: int = None, **kwargs):
         self.history.append(
             f"[{datetime.now(timezone.utc).isoformat()}] << ClearChargingProfile"
         )
+
+        if charging_profile_id is None:
+            self.charging_profiles.clear()
+            return call_result.ClearChargingProfile(
+                status=ClearChargingProfileStatusEnumType.accepted
+            )
+
+        for evse_id, profile in self.charging_profiles.items():
+            if profile.get("id") == charging_profile_id:
+                del self.charging_profiles[evse_id]
+                return call_result.ClearChargingProfile(
+                    status=ClearChargingProfileStatusEnumType.accepted
+                )
+
         return call_result.ClearChargingProfile(
-            status=ClearChargingProfileStatusEnumType.accepted
+            status=ClearChargingProfileStatusEnumType.unknown
         )
 
     async def _firmware_update_process(self, request_id: int):

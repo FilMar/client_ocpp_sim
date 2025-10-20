@@ -37,25 +37,79 @@ async def logs(charge_point, *args):
 async def connect(charge_point, evse_id_str):
     """Simulate connecting a vehicle to an EVSE."""
     evse_id = int(evse_id_str)
-    charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.occupied
-    await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.occupied)
-    tx_id = str(uuid.uuid4())
-    
-    try:
-        response = await charge_point.send_transaction_event(
-            TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0, evse_id=evse_id, connector_id=1
+
+    # Controlla se esiste già una transazione con remote start pending per questo EVSE
+    if evse_id in charge_point.transactions and charge_point.transactions[evse_id].get("pending_remote_start"):
+        tx = charge_point.transactions[evse_id]
+
+        # Cambia lo stato dell'EVSE a occupied
+        charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.occupied
+        await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.occupied)
+
+        # Invia TransactionEvent updated con trigger CablePluggedIn
+        tx["seq_no"] += 1
+        await charge_point.send_transaction_event(
+            TransactionEventEnumType.updated,
+            tx["transaction_id"],
+            TriggerReasonEnumType.cable_plugged_in,
+            tx["seq_no"],
+            evse_id=evse_id,
+            connector_id=1
         )
-        # Solo se il TransactionEvent viene accettato, salviamo la transazione localmente
-        charge_point.transactions[evse_id] = {
-            "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": evse_id
-        }
-        print(f"EVSE {evse_id} Occupied, transaction {tx_id} started.")
+
+        # Rimuovi il flag pending
+        del tx["pending_remote_start"]
+
+        print(f"EVSE {evse_id} Occupied, remote start transaction {tx['transaction_id']} now connected.")
+
+        # Avvia automaticamente la ricarica
+        tx["seq_no"] += 1
+        await charge_point.send_transaction_event(
+            TransactionEventEnumType.updated,
+            tx["transaction_id"],
+            TriggerReasonEnumType.charging_state_changed,
+            tx["seq_no"],
+            evse_id=evse_id,
+            connector_id=1
+        )
+
+        # Cambia lo stato a unavailable durante la ricarica
+        charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.unavailable
+        await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.unavailable)
+
+        # Avvia il meter values sender
+        task = asyncio.create_task(charge_point.meter_values_sender(evse_id))
+        tx["meter_task"] = task
+
+        print(f"Charging automatically started for transaction {tx['transaction_id']}.")
         save_state(charge_point)
-    except Exception as e:
-        print(f"Error starting transaction: {e}")
-        # Ripristina lo stato dell'EVSE se la transazione fallisce
-        charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.available
-        await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.available)
+
+    else:
+        # Comportamento normale: connessione senza remote start
+        # Verifica se esiste già una transazione attiva (non pending) su questo EVSE
+        if evse_id in charge_point.transactions:
+            print(f"Error: EVSE {evse_id} already has an active transaction.")
+            return
+
+        charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.occupied
+        await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.occupied)
+        tx_id = str(uuid.uuid4())
+
+        try:
+            response = await charge_point.send_transaction_event(
+                TransactionEventEnumType.started, tx_id, TriggerReasonEnumType.cable_plugged_in, 0, evse_id=evse_id, connector_id=1
+            )
+            # Solo se il TransactionEvent viene accettato, salviamo la transazione localmente
+            charge_point.transactions[evse_id] = {
+                "transaction_id": tx_id, "seq_no": 0, "energy": 0, "evse_id": evse_id
+            }
+            print(f"EVSE {evse_id} Occupied, transaction {tx_id} started.")
+            save_state(charge_point)
+        except Exception as e:
+            print(f"Error starting transaction: {e}")
+            # Ripristina lo stato dell'EVSE se la transazione fallisce
+            charge_point.evses[evse_id]["status"] = ConnectorStatusEnumType.available
+            await charge_point.send_status_notification(evse_id, ConnectorStatusEnumType.available)
 
 
 async def authorize(charge_point, id_token):
@@ -77,18 +131,30 @@ async def event(charge_point, event_type, *description_parts):
 async def charge(charge_point, evse_id_str):
     """Start charging."""
     evse_id = int(evse_id_str)
-    if evse_id in charge_point.transactions and "meter_task" not in charge_point.transactions[evse_id]:
-        tx = charge_point.transactions[evse_id]
-        tx["seq_no"] += 1
-        await charge_point.send_transaction_event(
-            TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.charging_state_changed, tx["seq_no"], evse_id=evse_id, connector_id=1
-        )
-        task = asyncio.create_task(charge_point.meter_values_sender(evse_id))
-        tx["meter_task"] = task
-        print(f"Charging started for transaction {tx['transaction_id']}.")
-        save_state(charge_point)
-    else:
-        print("Error: No active transaction or already charging.")
+    if evse_id not in charge_point.transactions:
+        print("Error: No active transaction on this EVSE.")
+        return
+
+    tx = charge_point.transactions[evse_id]
+
+    # Verifica se c'è un remote start pending (non ancora connesso)
+    if tx.get("pending_remote_start"):
+        print("Error: Remote start is pending. Please connect the cable first using 'connect <evse_id>'.")
+        return
+
+    # Verifica se sta già caricando
+    if "meter_task" in tx:
+        print("Error: Already charging.")
+        return
+
+    tx["seq_no"] += 1
+    await charge_point.send_transaction_event(
+        TransactionEventEnumType.updated, tx["transaction_id"], TriggerReasonEnumType.charging_state_changed, tx["seq_no"], evse_id=evse_id, connector_id=1
+    )
+    task = asyncio.create_task(charge_point.meter_values_sender(evse_id))
+    tx["meter_task"] = task
+    print(f"Charging started for transaction {tx['transaction_id']}.")
+    save_state(charge_point)
 
 
 async def stop_charge(charge_point, evse_id_str):
