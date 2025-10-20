@@ -40,7 +40,18 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                     first_connector = list(evse["connectors"].values())[0]
                     evse["status"] = ConnectorStatusEnumType(first_connector["status"])
                     del evse["connectors"]
-            self.transactions = saved_state.get("transactions", {})
+
+            # Load transactions and clean up invalid ones
+            raw_transactions = saved_state.get("transactions", {})
+            self.transactions = {}
+            for tx_key, tx_data in raw_transactions.items():
+                evse_id = tx_data.get("evse_id")
+                # Skip transactions on available EVSEs (inconsistent state)
+                if evse_id and evse_id in self.evses:
+                    if self.evses[evse_id]["status"] == ConnectorStatusEnumType.available:
+                        logging.warning(f"Skipping transaction {tx_data.get('transaction_id')} on available EVSE {evse_id}")
+                        continue
+                self.transactions[tx_key] = tx_data
         else:
             self.evses = {
                 i: {"status": ConnectorStatusEnumType.available}
@@ -128,7 +139,7 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                 )
 
                 # Send TransactionEvent with meter values
-                await self.send_transaction_event(
+                response = await self.send_transaction_event(
                     event_type=TransactionEventEnumType.updated,
                     transaction_id=transaction["transaction_id"],
                     trigger_reason=TriggerReasonEnumType.meter_value_periodic,
@@ -137,6 +148,17 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                     connector_id=1,
                     meter_value=meter_value,
                 )
+
+                # If server rejected the transaction, stop sending updates
+                if response is None:
+                    logging.warning(f"Server rejected transaction {transaction['transaction_id']}, stopping meter values sender")
+                    # Clean up the transaction
+                    if tx_key in self.transactions:
+                        del self.transactions[tx_key]
+                    # Save state
+                    from .state import save_state
+                    save_state(self)
+                    break
         except asyncio.CancelledError:
             logging.info(f"Meter values sender for EVSE {tx_key} was cancelled")
             raise
@@ -152,6 +174,13 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
         for tx_key, tx_data in self.transactions.items():
             transaction_id = tx_data.get("transaction_id")
             evse_id = tx_data.get("evse_id")
+
+            # Remove transaction if EVSE is available (no vehicle connected)
+            if evse_id and evse_id in self.evses:
+                if self.evses[evse_id]["status"] == ConnectorStatusEnumType.available:
+                    logging.warning(f"Removing transaction {transaction_id} - EVSE {evse_id} is available (no vehicle)")
+                    transactions_to_remove.append(tx_key)
+                    continue
 
             # Skip invalid transactions
             if not transaction_id or not evse_id:
@@ -189,7 +218,7 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
             )
 
             # Send TransactionEvent with trigger ChargingStateChanged
-            await self.send_transaction_event(
+            response = await self.send_transaction_event(
                 event_type=TransactionEventEnumType.updated,
                 transaction_id=transaction_id,
                 trigger_reason=TriggerReasonEnumType.charging_state_changed,
@@ -198,6 +227,12 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                 connector_id=1,
                 meter_value=meter_value,
             )
+
+            # If server rejected the transaction, mark it for removal
+            if response is None:
+                logging.warning(f"Server rejected resumed transaction {transaction_id}, removing it")
+                transactions_to_remove.append(tx_key)
+                continue
 
         # Remove invalid/pending transactions
         for tx_key in transactions_to_remove:

@@ -1,20 +1,12 @@
 {
     "evses": {
         "1": {
-            "status": "Unavailable"
+            "status": "Occupied"
         },
         "2": {
             "status": "Available"
         }
     },
-    "transactions": {
-        "1": {
-            "transaction_id": "dbb72401-9677-4176-b926-cf71bb1b4b33",
-            "seq_no": 160,
-            "energy": 15900,
-            "evse_id": 1,
-            "remote_start_id": 390659,
-            "is_charging": true
-        }
-    }
+    "transactions": {},
+    "charging_profiles": {}
 }

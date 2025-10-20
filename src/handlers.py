@@ -78,7 +78,7 @@ class CoreHandlers:
                 tx["seq_no"] += 1
 
                 # Invia TransactionEvent updated con trigger RemoteStart
-                await self.send_transaction_event(
+                response = await self.send_transaction_event(
                     event_type=TransactionEventEnumType.updated,
                     transaction_id=tx["transaction_id"],
                     trigger_reason=TriggerReasonEnumType.remote_start,
@@ -86,6 +86,13 @@ class CoreHandlers:
                     evse_id=evse_id,
                     connector_id=1
                 )
+
+                # If server rejected, stop here
+                if response is None:
+                    self.history.append(
+                        f"[{datetime.now(timezone.utc).isoformat()}] Remote start rejected by server for EVSE {evse_id}"
+                    )
+                    return
 
                 # Cambia lo stato a unavailable durante la ricarica
                 self.evses[evse_id]["status"] = ConnectorStatusEnumType.unavailable
@@ -124,7 +131,7 @@ class CoreHandlers:
             connector_id=1
         )
 
-        if response:
+        if response is not None:
             # Salva la transazione con flag che indica che è in attesa del plug-in
             self.transactions[evse_id] = {
                 "transaction_id": tx_id,

@@ -54,8 +54,18 @@ class ChargePointSenderMixin:
             f"[{datetime.now(timezone.utc).isoformat()}] >> TransactionEvent (Type: {
                 event_type}, TxId: {transaction_id})"
         )
-        response = await self.call(request)
-        return response
+
+        try:
+            response = await self.call(request)
+            return response
+        except Exception as e:
+            # Server rejected the transaction (CallError or other exception)
+            import logging
+            logging.warning(f"TransactionEvent rejected by server: {e}")
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] << TransactionEvent REJECTED: {e}"
+            )
+            return None
 
     async def send_firmware_status_notification(self, status: FirmwareStatusEnumType, request_id: int):
         request = call.FirmwareStatusNotification(
