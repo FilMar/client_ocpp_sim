@@ -117,3 +117,15 @@ class ChargePointSenderMixin:
                 }] >> NotifyEvent (Type: {event_type})"
         )
         await self.call(request)
+
+    async def send_report_charging_profiles(self, request_id: int, evse_id: int, charging_profile: dict, source: str = "CSO"):
+        request = call.ReportChargingProfiles(
+            request_id=request_id,
+            charging_limit_source=source,
+            evse_id=evse_id,
+            charging_profile=[charging_profile],
+        )
+        self.history.append(
+            f"[{datetime.now(timezone.utc).isoformat()}] >> ReportChargingProfiles (RequestId: {request_id}, EvseId: {evse_id}, ProfileId: {charging_profile.get('id', 'unknown')})"
+        )
+        await self.call(request)

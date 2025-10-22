@@ -58,7 +58,9 @@ class ChargePoint(ocpp_ChargePoint, CoreHandlers, ChargePointSenderMixin):
                 for i in range(1, connectors + 1)
             }
             self.transactions = {}
-        self.charging_profiles = saved_state.get("charging_profiles", {}) if saved_state else {}
+        
+        raw_profiles = saved_state.get("charging_profiles", {}) if saved_state else {}
+        self.charging_profiles = {int(k): v for k, v in raw_profiles.items()} if raw_profiles else {}
 
     def get_power_limit(self, evse_id):
         # Simplified: assumes one profile per EVSE and a simple schedule.

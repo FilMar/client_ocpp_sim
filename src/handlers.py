@@ -303,7 +303,16 @@ class CoreHandlers:
                 status=ChargingProfileStatusEnumType.rejected
             )
 
-        schedule = charging_profile["charging_schedule"]
+        schedule_list = charging_profile["charging_schedule"]
+        if not isinstance(schedule_list, list) or len(schedule_list) == 0:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: charging_schedule must be a non-empty list"
+            )
+            return call_result.SetChargingProfile(
+                status=ChargingProfileStatusEnumType.rejected
+            )
+
+        schedule = schedule_list[0]
         if "charging_rate_unit" not in schedule or "charging_schedule_period" not in schedule:
             self.history.append(
                 f"[{datetime.now(timezone.utc).isoformat()}] SetChargingProfile rejected: invalid charging_schedule"
@@ -353,20 +362,36 @@ class CoreHandlers:
                 status=GetChargingProfileStatusEnumType.no_profiles
             )
 
-        # If evse_id is specified, check if we have a profile for it
+        # If evse_id is specified, send only that profile
         if evse_id is not None:
             if evse_id not in self.charging_profiles:
                 return call_result.GetChargingProfiles(
                     status=GetChargingProfileStatusEnumType.no_profiles
                 )
 
-            # TODO: In a complete implementation, we should send ReportChargingProfiles
-            # with the actual profile data. For now, we just confirm we have it.
+            # Send ReportChargingProfiles with the profile data
+            asyncio.create_task(
+                self.send_report_charging_profiles(
+                    request_id=request_id,
+                    evse_id=evse_id,
+                    charging_profile=self.charging_profiles[evse_id]
+                )
+            )
+
             return call_result.GetChargingProfiles(
                 status=GetChargingProfileStatusEnumType.accepted
             )
 
-        # If no evse_id specified, return accepted if we have any profiles
+        # If no evse_id specified, send all profiles
+        for eid, profile in self.charging_profiles.items():
+            asyncio.create_task(
+                self.send_report_charging_profiles(
+                    request_id=request_id,
+                    evse_id=eid,
+                    charging_profile=profile
+                )
+            )
+
         return call_result.GetChargingProfiles(
             status=GetChargingProfileStatusEnumType.accepted
         )
