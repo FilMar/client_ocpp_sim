@@ -154,11 +154,77 @@ class CoreHandlers:
     @on(Action.request_stop_transaction)
     async def on_request_stop_transaction(self, transaction_id: str, **kwargs):
         self.history.append(
-            f"[{datetime.now(timezone.utc).isoformat()}] << RequestStopTransaction"
+            f"[{datetime.now(timezone.utc).isoformat()}] << RequestStopTransaction (TxId: {transaction_id})"
         )
+        
+        # Trova la transazione corrispondente
+        evse_id = None
+        for eid, tx in self.transactions.items():
+            if tx["transaction_id"] == transaction_id:
+                evse_id = eid
+                break
+        
+        if evse_id is None:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] RequestStopTransaction rejected: transaction {transaction_id} not found"
+            )
+            return call_result.RequestStopTransaction(
+                status=RequestStartStopStatusEnumType.rejected
+            )
+        
+        tx = self.transactions[evse_id]
+        
+        # Verifica se sta caricando
+        if "meter_task" not in tx:
+            self.history.append(
+                f"[{datetime.now(timezone.utc).isoformat()}] RequestStopTransaction: transaction {transaction_id} is not charging"
+            )
+            return call_result.RequestStopTransaction(
+                status=RequestStartStopStatusEnumType.accepted
+            )
+        
+        # Ferma la ricarica in background
+        asyncio.create_task(self._handle_remote_stop_transaction(evse_id, transaction_id))
+        
         return call_result.RequestStopTransaction(
             status=RequestStartStopStatusEnumType.accepted
         )
+    
+    async def _handle_remote_stop_transaction(self, evse_id, transaction_id):
+        """Gestisce lo stop della ricarica per RequestStopTransaction."""
+        tx = self.transactions[evse_id]
+        
+        # Cancella il meter task
+        if "meter_task" in tx:
+            tx["meter_task"].cancel()
+            try:
+                await tx["meter_task"]
+            except asyncio.CancelledError:
+                pass
+            del tx["meter_task"]
+        
+        # Invia TransactionEvent updated con trigger remote_stop
+        tx["seq_no"] += 1
+        await self.send_transaction_event(
+            event_type=TransactionEventEnumType.updated,
+            transaction_id=transaction_id,
+            trigger_reason=TriggerReasonEnumType.remote_stop,
+            seq_no=tx["seq_no"],
+            evse_id=evse_id,
+            connector_id=1
+        )
+        
+        # Cambia lo stato a occupied (cavo ancora connesso ma non in carica)
+        self.evses[evse_id]["status"] = ConnectorStatusEnumType.occupied
+        await self.send_status_notification(evse_id, ConnectorStatusEnumType.occupied)
+        
+        self.history.append(
+            f"[{datetime.now(timezone.utc).isoformat()}] Remote stop: charging stopped for transaction {transaction_id} on EVSE {evse_id}"
+        )
+        
+        # Salva lo stato
+        from .state import save_state
+        save_state(self)
 
     @on(Action.change_availability)
     async def on_change_availability(self, **kwargs):
